@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blog-spark-4.2-by-example"
+version = "0.1.0"
+requires-python = "==3.11.*"
+dependencies = [
+    "pyspark==4.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff==0.14.4",
+    "black==25.11.0",
+]
