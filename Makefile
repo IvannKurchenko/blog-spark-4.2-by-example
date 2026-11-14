@@ -16,3 +16,9 @@ clean:
 
 clean-spark:
 	rm -rf data metastore_db spark-warehouse
+
+up:
+	docker compose up
+
+down:
+	docker compose down

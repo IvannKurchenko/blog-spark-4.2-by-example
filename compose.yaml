@@ -1,0 +1,72 @@
+name: unitycatalog
+
+services:
+  # Don't change `server` name because it ui image expects this in runtime
+  server:
+    image: unitycatalog/unitycatalog:v0.5.0
+    ports:
+      - "8080:8080"
+    volumes:
+      - type: volume
+        source: unitycatalog_data
+        target: /opt/unitycatalog/etc/data
+      - type: bind
+        source: ./compose-uc-server.properties
+        target: /home/unitycatalog/etc/conf/server.properties
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - local-bricks
+
+  uc-ui:
+    image: unitycatalog/unitycatalog-ui:main-aadc6fc
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+    networks:
+      - local-bricks
+
+  spark-server:
+    image: apache/spark:4.2.0
+    user: "0"
+    ports:
+      - "15002:15002"
+      - "8081:8080"
+      - "4040:4040"
+    volumes:
+      - type: volume
+        source: unitycatalog_data
+        target: /opt/unitycatalog/etc/data
+    entrypoint:
+      - /opt/spark/bin/spark-submit
+      - --class
+      - org.apache.spark.sql.connect.service.SparkConnectServer
+      - --packages
+      - "io.delta:delta-spark_2.13:4.2.0,io.unitycatalog:unitycatalog-spark_4.2_2.13:0.5.0"
+      - --conf
+      - spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension
+      - --conf
+      - spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog
+      - --conf
+      - spark.sql.catalog.unity=io.unitycatalog.spark.UCSingleCatalog
+      - --conf
+      - "spark.sql.catalog.unity.uri=http://server:8080"
+      - --conf
+      - spark.sql.catalog.unity.token=
+      - --conf
+      - "spark.driver.extraJavaOptions=-Divy.cache.dir=/tmp -Divy.home=/tmp"
+    depends_on:
+      - server
+    networks:
+      - local-bricks
+
+networks:
+  local-bricks:
+    driver: bridge
+
+volumes:
+  unitycatalog_data:
