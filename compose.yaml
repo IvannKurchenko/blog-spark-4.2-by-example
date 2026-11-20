@@ -3,7 +3,7 @@ name: unitycatalog
 services:
   # Don't change `server` name because it ui image expects this in runtime
   server:
-    image: unitycatalog/unitycatalog:v0.5.0
+    image: unitycatalog/unitycatalog:v0.7.0
     ports:
       - "8080:8080"
     volumes:
@@ -46,7 +46,7 @@ services:
       - --class
       - org.apache.spark.sql.connect.service.SparkConnectServer
       - --packages
-      - "io.delta:delta-spark_2.13:4.2.0,io.unitycatalog:unitycatalog-spark_4.2_2.13:0.5.0"
+      - "io.delta:delta-spark_2.13:4.2.0,io.unitycatalog:unitycatalog-spark_4.2_2.13:0.7.0"
       - --conf
       - spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension
       - --conf

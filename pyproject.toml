@@ -15,3 +15,10 @@ dev = [
     "ruff==0.14.4",
     "black==25.11.0",
 ]
+
+[project.scripts]
+app-semantic-modeling = "src.demo.semantic_modeling:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

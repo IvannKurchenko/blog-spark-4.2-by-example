@@ -22,3 +22,7 @@ up:
 
 down:
 	docker compose down
+
+app-semantic-modeling:
+	@rm -rf spark-warehouse
+	@uv run app-semantic-modeling
