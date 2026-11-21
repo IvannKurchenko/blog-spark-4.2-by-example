@@ -46,7 +46,7 @@ services:
       - --class
       - org.apache.spark.sql.connect.service.SparkConnectServer
       - --packages
-      - "io.delta:delta-spark_2.13:4.2.0,io.unitycatalog:unitycatalog-spark_4.2_2.13:0.7.0"
+      - "io.delta:delta-spark_2.13:4.4.1,io.unitycatalog:unitycatalog-spark_4.2_2.13:0.7.0"
       - --conf
       - spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension
       - --conf
@@ -57,6 +57,14 @@ services:
       - "spark.sql.catalog.unity.uri=http://server:8080"
       - --conf
       - spark.sql.catalog.unity.token=
+      - --conf
+      - spark.sql.catalog.production=io.unitycatalog.spark.UCSingleCatalog
+      - --conf
+      - "spark.sql.catalog.production.uri=http://server:8080"
+      - --conf
+      - spark.sql.catalog.production.auth.type=static
+      - --conf
+      - spark.sql.catalog.production.auth.token=not-used
       - --conf
       - "spark.driver.extraJavaOptions=-Divy.cache.dir=/tmp -Divy.home=/tmp"
     depends_on:

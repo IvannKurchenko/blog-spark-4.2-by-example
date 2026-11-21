@@ -30,7 +30,7 @@ Spark 4.2 Connect server wired to it via the `unity` catalog. Delta Lake and the
 Unity Catalog Spark connector are loaded as Spark packages.
 
 ```bash
-make up    # start Unity Catalog + UI + Spark Connect server
+make docker-compose-up  # start Unity Catalog + UI + Spark Connect server
 make down  # stop the stack
 ```
 
@@ -48,4 +48,21 @@ from pyspark.sql import SparkSession
 
 spark = SparkSession.builder.remote("sc://localhost").getOrCreate()
 spark.sql("SHOW CATALOGS").show()
+```
+
+### Warehouse demo
+
+With the stack running, create the `production` catalog once in Unity Catalog:
+
+```bash
+curl --fail-with-body -X POST http://localhost:8080/api/2.1/unity-catalog/catalogs \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"production","storage_root":"file:///opt/unitycatalog/etc/data/production"}'
+```
+
+Run the demo to create the `bronze` schema and create or replace
+`production.bronze.warehouses` with the five warehouse rows from the setup script:
+
+```bash
+uv run app-remote-spark
 ```

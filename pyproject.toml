@@ -6,8 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "blog-spark-4.2-by-example"
 version = "0.1.0"
 requires-python = "==3.11.*"
+
 dependencies = [
     "pyspark==4.2.0",
+    "pyspark-client==4.2.0",
 ]
 
 [project.optional-dependencies]
@@ -17,6 +19,7 @@ dev = [
 ]
 
 [project.scripts]
+app-remote-spark = "src.demo.remote_spark:main"
 app-semantic-modeling = "src.demo.semantic_modeling:main"
 
 [tool.setuptools.packages.find]

@@ -1,35 +1,37 @@
-# Spark 4.2 by example: Hands-on overvie of new features
+# Spark 4.2 by example: Hands-on overview of new features
 
 ### Introduction
-Most of the media content dedicated to Spark 4.2 recently left some questions behind with regard to a practical aspect.
-This is a gap that this post tries to cover. We will discover new Spark 4.2 major features with focus on hands-on practise.
+Most of the media content dedicated to Spark 4.2 recently left some questions behind with regard to practical aspects.
+This is a gap that this post tries to cover. We will discover major new Spark 4.2 features with a focus on hands-on practice.
 
 ### Setup
-First, lets outline a project setup that will serve as foundation for further demos.
+First, let's outline a project setup that will serve as a foundation for further demos.
 
-An example data project is pipeline for IoT system that tracks readings from a number of sensors across enterprise warehouses, that belongs to the same company - Abstract Warehouse Company (AWC).
+An example data project is a pipeline for an IoT system that tracks readings from a number of sensors across enterprise warehouses that belong to the same company, Abstract Warehouse Company (AWC).
 
-Domain model is the following:
-- `warehouse` - single warehouse.
-- `section` - each warehouse is subdivided on a number of sections. `warehouse` has 1-to-many relation with `section`;
-- `sensor` - installable IoT device. Sensors differ by type, such as humiditiy motion etc.
-- `installation` - `sensor` installation event into particular `section`. `installation` has 1-to-1 relations between `sensor` and `section`;
-- `reading` - single sensor reading value at a point of a time. `sensor` has 1-to-many relations with `reading`;
+The domain model is as follows:
 
-Schema tables that represents corresponding domain entities:
-- `sensor` - a table describing sensor metadata. Properties: sensor_id (incremental), sensor_type (Enumeration: humidity, temperature, motion, smoke etc), manufacturer: (string), measurement_unit (Enumeration: percentage, celcious, boolean etc); 
-- `reading` - a table describing a sensor reading value in moment of time: reading_id (UUID), sensor_id (FK), timestamp (TIMESTAMP NTZ), value (measurement value, type variant for flexibility);
-- `warehouse` - a table describing an enterprise warehouse. Properties: warehouse_id (incremental), warehouse_name (string), warehouse_county (ISO-3166 alpha-3 code);
-- `section` - a table describing an enterprise warehouse section. Properties: section_id (incremental PK), warehouse_id (FK), index (alpha-numerical representation on map, e.g. A1,B3)
-- `installation` - a table describing an sensor sensor installation in warehouse. Properties: installation_id (incremental PK), section_id (FK), sensor_id (FK), , installation_timestamp (TIMESTAMP NTZ), installation_removal (TIMESTAMP NTZ, optional);
+- `warehouse` – a single warehouse.
+- `section` – each warehouse is subdivided into a number of sections. `warehouse` has a one-to-many relationship with `section`.
+- `sensor` – an installable IoT device. Sensors differ by type, including humidity and motion.
+- `installation` – a `sensor` installation event in a particular `section`. `installation` has one-to-one relationships with `sensor` and `section`.
+- `reading` – a single sensor reading value at a point in time. `sensor` has a one-to-many relationship with `reading`.
+
+The schema tables represent the corresponding domain entities.
+
+- `sensor` – a table describing sensor metadata. Properties: sensor_id (incremental), sensor_type (Enumeration: humidity, temperature, motion, smoke, etc.), manufacturer (string), measurement_unit (Enumeration: percentage, Celsius, boolean, etc.).
+- `reading` – a table describing a sensor reading value at a point in time: reading_id (UUID), sensor_id (FK), timestamp (TIMESTAMP NTZ), value (measurement value, type variant for flexibility).
+- `warehouse` – a table describing an enterprise warehouse. Properties: warehouse_id (incremental), warehouse_name (string), warehouse_country (ISO-3166 alpha-3 code).
+- `section` – a table describing an enterprise warehouse section. Properties: section_id (incremental PK), warehouse_id (FK), index (alpha-numerical representation on a map, e.g., A1, B3).
+- `installation` – a table describing a sensor installation in a warehouse. Properties: installation_id (incremental PK), section_id (FK), sensor_id (FK), installation_timestamp (TIMESTAMP NTZ), installation_removal (TIMESTAMP NTZ, optional).
 
 ### Spark: Metrics and Semantic Modeling
-Metrics views is another obejct type that is now available in Spark. The main problem it solves is to bring semantic layer closer to raw data to have it defined in a single place.
-Lets consider this on an example for our AWC. 
+A metrics view is another object type that is now available in Spark. The main problem it solves is to bring the semantic layer closer to raw data to have it defined in a single place.
+Let's consider an example for AWC.
 
-The theoretical use case: the company goes though warehouses digitalisation process. The managment wants to have visibility of the progress. It was proposed a business metric to track - "Active Installations Coverage", showing percentage of warehouses sections with actively installed sensors. Metric should be calculated in the same way but at the different granularity for the different management levels: C-suite management wants to understand situation over entire company, while country and ware house managements at their respective levels.
+In this theoretical use case, the company goes through a warehouse digitalisation process. Management wants to have visibility into the progress. A business metric called “Active Installations Coverage” was proposed to show the percentage of warehouse sections with actively installed sensors. The metric should be calculated in the same way at different levels of granularity for different management levels. C-suite management wants to understand the situation across the entire company, while country and warehouse managers want to understand it at their respective levels.
 
-Classical approach would to define precise calculations per use case as following. First, we would need to create a view consolidating all the data:
+The classical approach would be to define precise calculations for each use case. First, we would need to create a view consolidating all the data:
 ```sql
 CREATE OR REPLACE VIEW installations_view AS
 SELECT
@@ -51,7 +53,7 @@ LEFT JOIN sensor s ON s.sensor_id = i.sensor_id
 LEFT JOIN warehouse w ON w.warehouse_id = sec.warehouse_id
 ```
 
-Having this in place, we can now proceed to calculation at the most granular level - by warehouse, section and sensor type for warehouse managers:
+Having this in place, we can now proceed to the calculation at the most granular level, by warehouse, section, and sensor type, for warehouse managers:
 ```sql
 WITH section_sensor_counts AS (
     SELECT
@@ -71,7 +73,7 @@ SELECT *, total_active_installed_sections / total_sections AS active_installatio
 FROM section_sensor_counts
 ```
 
-Super now to it shows result similar to the following:
+Great, the query now shows a result similar to the following:
 ```
 +-----------------+--------------+-------------+-----------+-------------------------------+--------------+-----------------------------+
 |warehouse_country|warehouse_name|section_index|sensor_type|total_active_installed_sections|total_sections|active_installations_coverage|
@@ -84,7 +86,7 @@ Super now to it shows result similar to the following:
 +-----------------+--------------+-------------+-----------+-------------------------------+--------------+-----------------------------+
 ```
 
-One requirement has been solved one more to go. Now we need to calculate same metrics for different granularity - per warehouse for country managers:
+One requirement has been met, and there is one more to go. Now we need to calculate the same metrics at a different level of granularity, per warehouse for country managers:
 ```sql
 WITH warehouse_counts AS (
     SELECT
@@ -102,7 +104,7 @@ SELECT *, total_active_installed_sections / total_sections AS active_installatio
 FROM warehouse_counts
 ```
 
-which produces reult similar to followings:
+This produces a result similar to the following:
 ```
 +-----------------+--------------+-------------------------------+--------------+-----------------------------+
 |warehouse_country|warehouse_name|total_active_installed_sections|total_sections|active_installations_coverage|
@@ -115,9 +117,9 @@ which produces reult similar to followings:
 +-----------------+--------------+-------------------------------+--------------+-----------------------------+
 ```
 
-Here you already can spot the issue - `total_active_installed_sections` and `total_sections` calculation duplicates.
+Here you can already spot the issue. The calculations for `total_active_installed_sections` and `total_sections` are duplicated.
 
-The first attempt to re-use this logic in one place could be in creating view with pre-aggregated calculates:
+A first attempt to reuse this logic in one place could be to create a view with pre-aggregated calculations:
 ```sql
 CREATE OR REPLACE VIEW installations_aggregated_view AS
 SELECT
@@ -137,7 +139,7 @@ LEFT JOIN warehouse w ON w.warehouse_id = sec.warehouse_id
 GROUP BY warehouse_country, warehouse_name, section_index, sensor_type
 ```
 
-so then to use it the following way:
+We can then use it the following way:
 ```sql
 SELECT
     warehouse_country,
@@ -149,7 +151,7 @@ FROM installations_aggregated_view
 GROUP BY warehouse_country, warehouse_name
 ```
 
-So as a result for the same data, we will get the following completely different numbers:
+As a result, for the same data, we will get the following completely different numbers:
 ```
 +-----------------+--------------+-------------------------------+--------------+-----------------------------+
 |warehouse_country|warehouse_name|total_active_installed_sections|total_sections|active_installations_coverage|
@@ -162,10 +164,10 @@ So as a result for the same data, we will get the following completely different
 +-----------------+--------------+-------------------------------+--------------+-----------------------------+
 ```
 
-Its pretty easy to spot root cause of issue `SUM(total_sections) AS total_sections` is not the same as `total_sections` calculated per different aggregation group.
-To keep it accurate in general case we still need to repeat same calculation. This is particularly where new metrics view shines and helps us.
+It's pretty easy to spot the root cause of the issue. `SUM(total_sections) AS total_sections` differs from `total_sections` calculated for a different aggregation group.
+To keep it accurate in the general case, we still need to repeat the same calculation. This is where the new metrics view particularly shines and helps us.
 
-Unlike regular view, metrics view are declared with YAML that separates notion of metrics and dimensions.
+Unlike regular views, metrics views are declared with YAML, which separates the notions of metrics and dimensions.
 ```sql
 CREATE OR REPLACE VIEW installations_metrics
 WITH METRICS
@@ -217,8 +219,8 @@ measures:
 $$
 ```
 
-which is then can be used to calculate same metrics at the lowest granularity levels:
-```
+We can then use the view to calculate the same metrics at the lowest levels of granularity:
+```sql
 SELECT
     warehouse_country,
     warehouse_name,
@@ -231,7 +233,7 @@ FROM installations_metrics
 GROUP BY ALL
 ```
 
-that produces result similar to the following: 
+This produces a result similar to the following:
 ```
 +-----------------+--------------+-------------+-----------+-------------------------------+--------------+-----------------------------+
 |warehouse_country|warehouse_name|section_index|sensor_type|total_active_installed_sections|total_sections|active_installations_coverage|
@@ -244,7 +246,7 @@ that produces result similar to the following:
 +-----------------+--------------+-------------+-----------+-------------------------------+--------------+-----------------------------+
 ```
 
-And the use case where metrics view brings the most value - the very same metrics can be now recalculated with different granularity pretty easily:
+A metrics view brings the most value when the same metrics need to be recalculated at a different level of granularity. We can now do that pretty easily:
 ```sql
 SELECT
     warehouse_country,
@@ -256,7 +258,7 @@ FROM installations_metrics
 GROUP BY warehouse_country, warehouse_name
 ```
 
-which produces desired numbers:
+This produces the desired numbers:
 ```
 +-----------------+--------------+-------------------------------+--------------+-----------------------------+
 |warehouse_country|warehouse_name|total_active_installed_sections|total_sections|active_installations_coverage|
@@ -269,19 +271,19 @@ which produces desired numbers:
 +-----------------+--------------+-------------------------------+--------------+-----------------------------+
 ```
 
-However, unline regular views metrics views have own limitation to keep in mind.
-They can't be dirrectly queried. Plain `SELECT * FROM installations_metrics` results in error, so author has to explicitely specify dimensions, measurements and grouping.
-Measures (`measures`) can't re-use other measures in definition.
-In our particular case that would be great to introduce new measurement `active_installations_coverage` like:
+However, metrics views have some limitations that regular views lack.
+They can't be queried directly. A plain `SELECT * FROM installations_metrics` results in an error, so the author has to explicitly specify dimensions, measures, and grouping.
+Measures (`measures`) can't reuse other measures in their definitions.
+In our particular case, it would be great to introduce a new measure, `active_installations_coverage`, like this:
 ```yaml
 measures:
   - name: active_installations_coverage
     expr: ROUND(total_active_installed_sections / total_sections, 2)
 ```
 
-However this is considered as invalid definition. The wourk around is repeated parts of query.
+However, this is considered an invalid definition. The workaround is to repeat parts of the query.
 
-Last but not least, `GROUP BY ROLLUP` and `GROUP BY GROUPING SETS` does not to be supported either.
+Last but not least, `GROUP BY ROLLUP` and `GROUP BY GROUPING SETS` do not appear to be supported either.
 ```sql
 SELECT
     warehouse_country,
@@ -294,7 +296,9 @@ FROM installations_metrics
 GROUP BY ROLLUP (warehouse_country, warehouse_name, sensor_type)
 ORDER BY warehouse_country, warehouse_name
 ```
-and 
+
+and
+
 ```sql
 SELECT
     warehouse_country,
@@ -307,16 +311,16 @@ GROUP BY GROUPING SETS ((warehouse_country), (warehouse_country, warehouse_name)
 ORDER BY warehouse_country, warehouse_name
 ```
 
-both would fail at Spark version `4.2.0`.
+Both queries would fail in Spark version `4.2.0`.
 
 #### References
-More on metrics view and semantic layer can be found here:
-References
-- https://books.japila.pl/spark-sql-internals/metric-views/
-- https://books.japila.pl/spark-sql-internals/sql/SparkSqlAstBuilder/#visitCacheTable
-- https://medium.com/@cheegodchang/why-do-we-need-unity-catalog-metric-views-455ce259519e
-- https://docs.databricks.com/aws/en/uc-semantics/metric-views/yaml-reference
-- https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/sql-ref-syntax-ddl-create-view
-- https://issues.apache.org/jira/browse/SPARK-60399 - Jira for Spark native documentation
-- https://github.com/apache/spark/pull/59386 - PR with Spark native documentation
-- https://docs.google.com/document/d/1xVTLijvDTJ90lZ_ujwzf9HvBJgWg0mY6cYM44Fcghl0/edit?tab=t.0#heading=h.5fdy0uyv19hp - "SPIP: Metrics & semantic modeling in Spark" google doc
+More on metrics views and the semantic layer can be found here:
+
+- <https://books.japila.pl/spark-sql-internals/metric-views/>
+- <https://books.japila.pl/spark-sql-internals/sql/SparkSqlAstBuilder/#visitCacheTable>
+- <https://medium.com/@cheegodchang/why-do-we-need-unity-catalog-metric-views-455ce259519e>
+- <https://docs.databricks.com/aws/en/uc-semantics/metric-views/yaml-reference>
+- <https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/sql-ref-syntax-ddl-create-view>
+- <https://issues.apache.org/jira/browse/SPARK-60399> - Jira for Spark native documentation
+- <https://github.com/apache/spark/pull/59386> - PR with Spark native documentation
+- <https://docs.google.com/document/d/1xVTLijvDTJ90lZ_ujwzf9HvBJgWg0mY6cYM44Fcghl0/edit?tab=t.0#heading=h.5fdy0uyv19hp> - "SPIP: Metrics & semantic modeling in Spark" Google Doc
