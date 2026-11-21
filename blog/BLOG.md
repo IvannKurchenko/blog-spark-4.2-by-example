@@ -29,28 +29,28 @@ The schema tables represent the corresponding domain entities.
 A metrics view is another object type that is now available in Spark. The main problem it solves is to bring the semantic layer closer to raw data to have it defined in a single place.
 Let's consider an example for AWC.
 
-In this theoretical use case, the company goes through a warehouse digitalisation process. Management wants to have visibility into the progress. A business metric called “Active Installations Coverage” was proposed to show the percentage of warehouse sections with actively installed sensors. The metric should be calculated in the same way at different levels of granularity for different management levels. C-suite management wants to understand the situation across the entire company, while country and warehouse managers want to understand it at their respective levels.
+In this theoretical use case, the company goes through a warehouse digitalisation process. Management wants to have visibility into the progress. A business metric called “Active Installations Coverage” was proposed to show the ratio of active installations to target installations. The target is one installation per section per sensor type, using the distinct types in the sensor inventory. The metric should be calculated in the same way at different levels of granularity for different management levels. C-suite management wants to understand the situation across the entire company, while country and warehouse managers want to understand it at their respective levels.
 
-The classical approach would be to define precise calculations for each use case. First, we would need to create a view consolidating all the data:
+The classical approach would be to define precise calculations for each use case. First, we create a view with every section and sensor-type combination, including targets with no active installation. An installation counts as active when its removal timestamp is null:
 ```sql
 CREATE OR REPLACE VIEW installations_view AS
 SELECT
     sec.section_id,
-    sec.warehouse_id,
-    sec.`index` as section_index,
-    i.installation_id,
-    i.sensor_id,
-    i.installation_timestamp,
-    i.installation_removal,
-    s.sensor_type,
-    s.manufacturer,
-    s.measurement_unit,
+    sec.`index` AS section_index,
+    types.sensor_type,
     w.warehouse_name,
-    w.warehouse_country
+    w.warehouse_country,
+    installed.installation_id,
+    installed.installation_removal
 FROM section sec
-LEFT JOIN installation i ON i.section_id = sec.section_id
-LEFT JOIN sensor s ON s.sensor_id = i.sensor_id
+CROSS JOIN (SELECT DISTINCT sensor_type FROM sensor) types
 LEFT JOIN warehouse w ON w.warehouse_id = sec.warehouse_id
+LEFT JOIN (
+    SELECT i.installation_id, i.section_id, s.sensor_type, i.installation_removal
+    FROM installation i
+    JOIN sensor s ON s.sensor_id = i.sensor_id
+) installed ON installed.section_id = sec.section_id
+    AND installed.sensor_type = types.sensor_type
 ```
 
 Having this in place, we can now proceed to the calculation at the most granular level, by warehouse, section, and sensor type, for warehouse managers:
@@ -61,29 +61,27 @@ WITH section_sensor_counts AS (
         warehouse_name,
         section_index,
         sensor_type,
-        COUNT(DISTINCT CASE
-            WHEN installation_id IS NOT NULL AND installation_removal IS NULL
-            THEN installation_id
-        END) AS total_active_installed_sections,
-        COUNT(DISTINCT section_id) AS total_sections
+        COUNT(DISTINCT installation_id) FILTER (WHERE installation_removal IS NULL)
+            AS total_active_installations,
+        COUNT(DISTINCT section_id, sensor_type) AS total_target_installations
     FROM installations_view
     GROUP BY warehouse_country, warehouse_name, section_index, sensor_type
 )
-SELECT *, total_active_installed_sections / total_sections AS active_installations_coverage
+SELECT *, total_active_installations / total_target_installations AS active_installations_coverage
 FROM section_sensor_counts
 ```
 
 Great, the query now shows a result similar to the following:
 ```
-+-----------------+--------------+-------------+-----------+-------------------------------+--------------+-----------------------------+
-|warehouse_country|warehouse_name|section_index|sensor_type|total_active_installed_sections|total_sections|active_installations_coverage|
-+-----------------+--------------+-------------+-----------+-------------------------------+--------------+-----------------------------+
-|              NLD| Rotterdam Hub|           A2|     motion|                              0|             1|                          0.0|
-|              DEU| Hamburg Depot|           A2|     motion|                              1|             1|                          1.0|
-|              FRA|Lyon Warehouse|           A3|      smoke|                              1|             1|                          1.0|
-|              NLD| Rotterdam Hub|           B1|      smoke|                              0|             1|                          0.0|
-|              NLD| Rotterdam Hub|           A2|   humidity|                              1|             1|                          1.0|
-+-----------------+--------------+-------------+-----------+-------------------------------+--------------+-----------------------------+
++-----------------+--------------+-------------+-----------+--------------------------+--------------------------+-----------------------------+
+|warehouse_country|warehouse_name|section_index|sensor_type|total_active_installations|total_target_installations|active_installations_coverage|
++-----------------+--------------+-------------+-----------+--------------------------+--------------------------+-----------------------------+
+|              NLD| Rotterdam Hub|           A2|     motion|                         0|                         1|                          0.0|
+|              FRA|Lyon Warehouse|           A2|      smoke|                         0|                         1|                          0.0|
+|              DEU| Hamburg Depot|           A2|     motion|                         1|                         1|                          1.0|
+|              FRA|Lyon Warehouse|           A3|     motion|                         0|                         1|                          0.0|
+|              NLD| Rotterdam Hub|           C5|   humidity|                         0|                         1|                          0.0|
++-----------------+--------------+-------------+-----------+--------------------------+--------------------------+-----------------------------+
 ```
 
 One requirement has been met, and there is one more to go. Now we need to calculate the same metrics at a different level of granularity, per warehouse for country managers:
@@ -92,32 +90,30 @@ WITH warehouse_counts AS (
     SELECT
         warehouse_country,
         warehouse_name,
-        COUNT(DISTINCT CASE
-            WHEN installation_id IS NOT NULL AND installation_removal IS NULL
-            THEN installation_id
-        END) AS total_active_installed_sections,
-        COUNT(DISTINCT section_id) AS total_sections
+        COUNT(DISTINCT installation_id) FILTER (WHERE installation_removal IS NULL)
+            AS total_active_installations,
+        COUNT(DISTINCT section_id, sensor_type) AS total_target_installations
     FROM installations_view
     GROUP BY warehouse_country, warehouse_name
 )
-SELECT *, total_active_installed_sections / total_sections AS active_installations_coverage
+SELECT *, total_active_installations / total_target_installations AS active_installations_coverage
 FROM warehouse_counts
 ```
 
 This produces a result similar to the following:
 ```
-+-----------------+--------------+-------------------------------+--------------+-----------------------------+
-|warehouse_country|warehouse_name|total_active_installed_sections|total_sections|active_installations_coverage|
-+-----------------+--------------+-------------------------------+--------------+-----------------------------+
-|              USA| Dallas Center|                              2|             2|                          1.0|
-|              FRA|Lyon Warehouse|                              2|             3|           0.6666666666666666|
-|              NLD| Rotterdam Hub|                              2|             3|           0.6666666666666666|
-|              GBR|London Station|                              3|             3|                          1.0|
-|              DEU| Hamburg Depot|                              3|             3|                          1.0|
-+-----------------+--------------+-------------------------------+--------------+-----------------------------+
++-----------------+--------------+--------------------------+--------------------------+-----------------------------+
+|warehouse_country|warehouse_name|total_active_installations|total_target_installations|active_installations_coverage|
++-----------------+--------------+--------------------------+--------------------------+-----------------------------+
+|              USA| Dallas Center|                         2|                         8|                         0.25|
+|              FRA|Lyon Warehouse|                         2|                        12|          0.16666666666666666|
+|              NLD| Rotterdam Hub|                         2|                        12|          0.16666666666666666|
+|              GBR|London Station|                         3|                        12|                         0.25|
+|              DEU| Hamburg Depot|                         3|                        12|                         0.25|
++-----------------+--------------+--------------------------+--------------------------+-----------------------------+
 ```
 
-Here you can already spot the issue. The calculations for `total_active_installed_sections` and `total_sections` are duplicated.
+Here you can already spot the issue. The calculations for `total_active_installations` and `total_target_installations` are duplicated.
 
 A first attempt to reuse this logic in one place could be to create a view with pre-aggregated calculations:
 ```sql
@@ -125,17 +121,12 @@ CREATE OR REPLACE VIEW installations_aggregated_view AS
 SELECT
     warehouse_country,
     warehouse_name,
-    sec.`index` as section_index,
+    section_index,
     sensor_type,
-    COUNT(DISTINCT CASE
-        WHEN i.installation_id IS NOT NULL AND i.installation_removal IS NULL
-        THEN i.installation_id
-    END) AS total_active_installed_sections,
-    COUNT(DISTINCT sec.section_id) AS total_sections
-FROM section sec
-LEFT JOIN installation i ON i.section_id = sec.section_id
-LEFT JOIN sensor s ON s.sensor_id = i.sensor_id
-LEFT JOIN warehouse w ON w.warehouse_id = sec.warehouse_id
+    COUNT(DISTINCT installation_id) FILTER (WHERE installation_removal IS NULL)
+        AS total_active_installations,
+    COUNT(DISTINCT section_id, sensor_type) AS total_target_installations
+FROM installations_view
 GROUP BY warehouse_country, warehouse_name, section_index, sensor_type
 ```
 
@@ -144,28 +135,27 @@ We can then use it the following way:
 SELECT
     warehouse_country,
     warehouse_name,
-    SUM(total_active_installed_sections) AS total_active_installed_sections,
-    SUM(total_sections) AS total_sections,
-    SUM(total_active_installed_sections) / SUM(total_sections) AS active_installations_coverage
+    SUM(total_active_installations) AS total_active_installations,
+    SUM(total_target_installations) AS total_target_installations,
+    SUM(total_active_installations) / SUM(total_target_installations) AS active_installations_coverage
 FROM installations_aggregated_view
 GROUP BY warehouse_country, warehouse_name
 ```
 
-As a result, for the same data, we will get the following completely different numbers:
+For this rollup, the pre-aggregated counts give the same result:
 ```
-+-----------------+--------------+-------------------------------+--------------+-----------------------------+
-|warehouse_country|warehouse_name|total_active_installed_sections|total_sections|active_installations_coverage|
-+-----------------+--------------+-------------------------------+--------------+-----------------------------+
-|              USA| Dallas Center|                              2|             3|           0.6666666666666666|
-|              FRA|Lyon Warehouse|                              2|             3|           0.6666666666666666|
-|              NLD| Rotterdam Hub|                              2|             5|                          0.4|
-|              GBR|London Station|                              3|             4|                         0.75|
-|              DEU| Hamburg Depot|                              3|             3|                          1.0|
-+-----------------+--------------+-------------------------------+--------------+-----------------------------+
++-----------------+--------------+--------------------------+--------------------------+-----------------------------+
+|warehouse_country|warehouse_name|total_active_installations|total_target_installations|active_installations_coverage|
++-----------------+--------------+--------------------------+--------------------------+-----------------------------+
+|              USA| Dallas Center|                         2|                         8|                         0.25|
+|              FRA|Lyon Warehouse|                         2|                        12|          0.16666666666666666|
+|              NLD| Rotterdam Hub|                         2|                        12|          0.16666666666666666|
+|              GBR|London Station|                         3|                        12|                         0.25|
+|              DEU| Hamburg Depot|                         3|                        12|                         0.25|
++-----------------+--------------+--------------------------+--------------------------+-----------------------------+
 ```
 
-It's pretty easy to spot the root cause of the issue. `SUM(total_sections) AS total_sections` differs from `total_sections` calculated for a different aggregation group.
-To keep it accurate in the general case, we still need to repeat the same calculation. This is where the new metrics view particularly shines and helps us.
+Each installation and each target belongs to a single section and sensor-type group, so the counts can be summed across those groups. The pre-aggregated view fixes the dimensions in advance. A metric view defines the measures once and evaluates them at the grain of each query.
 
 Unlike regular views, metrics views are declared with YAML, which separates the notions of metrics and dimensions.
 ```sql
@@ -176,24 +166,7 @@ AS $$
 version: 0.1
 
 # source query, view or table name to get data from.
-source: >
-    SELECT
-        sec.section_id,
-        sec.warehouse_id,
-        sec.`index` as section_index,
-        i.installation_id,
-        i.sensor_id,
-        i.installation_timestamp,
-        i.installation_removal,
-        s.sensor_type,
-        s.manufacturer,
-        s.measurement_unit,
-        w.warehouse_name,
-        w.warehouse_country
-    FROM section sec
-    LEFT JOIN installation i ON i.section_id = sec.section_id
-    LEFT JOIN sensor s ON s.sensor_id = i.sensor_id
-    LEFT JOIN warehouse w ON w.warehouse_id = sec.warehouse_id
+source: installations_view
 
 # dimensions - used in `GROUP BY` and `SELECT` clauses
 dimensions:
@@ -211,11 +184,11 @@ dimensions:
 
 # measures - used in `SELECT` clause, performs calculation over
 measures:
-  - name: total_active_installed_sections
-    expr: COUNT(DISTINCT installation_id) FILTER (WHERE installation_id IS NOT NULL AND installation_removal IS NULL)
+  - name: total_active_installations
+    expr: COUNT(DISTINCT installation_id) FILTER (WHERE installation_removal IS NULL)
 
-  - name: total_sections
-    expr: COUNT(DISTINCT section_id)
+  - name: total_target_installations
+    expr: COUNT(DISTINCT section_id, sensor_type)
 $$
 ```
 
@@ -226,24 +199,24 @@ SELECT
     warehouse_name,
     section_index,
     sensor_type,
-    MEASURE(total_active_installed_sections) as total_active_installed_sections,
-    MEASURE(total_sections) as total_sections,
-    MEASURE(total_active_installed_sections) /  MEASURE(total_sections) as active_installations_coverage
+    MEASURE(total_active_installations) as total_active_installations,
+    MEASURE(total_target_installations) as total_target_installations,
+    MEASURE(total_active_installations) /  MEASURE(total_target_installations) as active_installations_coverage
 FROM installations_metrics
 GROUP BY ALL
 ```
 
 This produces a result similar to the following:
 ```
-+-----------------+--------------+-------------+-----------+-------------------------------+--------------+-----------------------------+
-|warehouse_country|warehouse_name|section_index|sensor_type|total_active_installed_sections|total_sections|active_installations_coverage|
-+-----------------+--------------+-------------+-----------+-------------------------------+--------------+-----------------------------+
-|              NLD| Rotterdam Hub|           A2|     motion|                              0|             1|                          0.0|
-|              DEU| Hamburg Depot|           A2|     motion|                              1|             1|                          1.0|
-|              FRA|Lyon Warehouse|           A3|      smoke|                              1|             1|                          1.0|
-|              NLD| Rotterdam Hub|           B1|      smoke|                              0|             1|                          0.0|
-|              NLD| Rotterdam Hub|           A2|   humidity|                              1|             1|                          1.0|
-+-----------------+--------------+-------------+-----------+-------------------------------+--------------+-----------------------------+
++-----------------+--------------+-------------+-----------+--------------------------+--------------------------+-----------------------------+
+|warehouse_country|warehouse_name|section_index|sensor_type|total_active_installations|total_target_installations|active_installations_coverage|
++-----------------+--------------+-------------+-----------+--------------------------+--------------------------+-----------------------------+
+|              NLD| Rotterdam Hub|           A2|     motion|                         0|                         1|                          0.0|
+|              FRA|Lyon Warehouse|           A2|      smoke|                         0|                         1|                          0.0|
+|              DEU| Hamburg Depot|           A2|     motion|                         1|                         1|                          1.0|
+|              FRA|Lyon Warehouse|           A3|     motion|                         0|                         1|                          0.0|
+|              NLD| Rotterdam Hub|           C5|   humidity|                         0|                         1|                          0.0|
++-----------------+--------------+-------------+-----------+--------------------------+--------------------------+-----------------------------+
 ```
 
 A metrics view brings the most value when the same metrics need to be recalculated at a different level of granularity. We can now do that pretty easily:
@@ -251,24 +224,24 @@ A metrics view brings the most value when the same metrics need to be recalculat
 SELECT
     warehouse_country,
     warehouse_name,
-    MEASURE(total_active_installed_sections) AS total_active_installed_sections,
-    MEASURE(total_sections) AS total_sections,
-    MEASURE(total_active_installed_sections) / MEASURE(total_sections) AS active_installations_coverage
+    MEASURE(total_active_installations) AS total_active_installations,
+    MEASURE(total_target_installations) AS total_target_installations,
+    MEASURE(total_active_installations) / MEASURE(total_target_installations) AS active_installations_coverage
 FROM installations_metrics
 GROUP BY warehouse_country, warehouse_name
 ```
 
 This produces the desired numbers:
 ```
-+-----------------+--------------+-------------------------------+--------------+-----------------------------+
-|warehouse_country|warehouse_name|total_active_installed_sections|total_sections|active_installations_coverage|
-+-----------------+--------------+-------------------------------+--------------+-----------------------------+
-|              USA| Dallas Center|                              2|             2|                          1.0|
-|              FRA|Lyon Warehouse|                              2|             3|           0.6666666666666666|
-|              NLD| Rotterdam Hub|                              2|             3|           0.6666666666666666|
-|              GBR|London Station|                              3|             3|                          1.0|
-|              DEU| Hamburg Depot|                              3|             3|                          1.0|
-+-----------------+--------------+-------------------------------+--------------+-----------------------------+
++-----------------+--------------+--------------------------+--------------------------+-----------------------------+
+|warehouse_country|warehouse_name|total_active_installations|total_target_installations|active_installations_coverage|
++-----------------+--------------+--------------------------+--------------------------+-----------------------------+
+|              USA| Dallas Center|                         2|                         8|                         0.25|
+|              FRA|Lyon Warehouse|                         2|                        12|          0.16666666666666666|
+|              NLD| Rotterdam Hub|                         2|                        12|          0.16666666666666666|
+|              GBR|London Station|                         3|                        12|                         0.25|
+|              DEU| Hamburg Depot|                         3|                        12|                         0.25|
++-----------------+--------------+--------------------------+--------------------------+-----------------------------+
 ```
 
 However, metrics views have some limitations that regular views lack.
@@ -278,7 +251,7 @@ In our particular case, it would be great to introduce a new measure, `active_in
 ```yaml
 measures:
   - name: active_installations_coverage
-    expr: ROUND(total_active_installed_sections / total_sections, 2)
+    expr: ROUND(total_active_installations / total_target_installations, 2)
 ```
 
 However, this is considered an invalid definition. The workaround is to repeat parts of the query.
@@ -289,9 +262,9 @@ SELECT
     warehouse_country,
     warehouse_name,
     sensor_type,
-    MEASURE(total_active_installed_sections) as total_active_installed_sections,
-    MEASURE(total_sections) as total_sections,
-    MEASURE(total_active_installed_sections) /  MEASURE(total_sections) as active_installations_coverage
+    MEASURE(total_active_installations) as total_active_installations,
+    MEASURE(total_target_installations) as total_target_installations,
+    MEASURE(total_active_installations) /  MEASURE(total_target_installations) as active_installations_coverage
 FROM installations_metrics
 GROUP BY ROLLUP (warehouse_country, warehouse_name, sensor_type)
 ORDER BY warehouse_country, warehouse_name
@@ -303,9 +276,9 @@ and
 SELECT
     warehouse_country,
     warehouse_name,
-    MEASURE(total_active_installed_sections) as total_active_installed_sections,
-    MEASURE(total_sections) as total_sections,
-    MEASURE(total_active_installed_sections) /  MEASURE(total_sections) as active_installations_coverage
+    MEASURE(total_active_installations) as total_active_installations,
+    MEASURE(total_target_installations) as total_target_installations,
+    MEASURE(total_active_installations) /  MEASURE(total_target_installations) as active_installations_coverage
 FROM installations_metrics
 GROUP BY GROUPING SETS ((warehouse_country), (warehouse_country, warehouse_name))
 ORDER BY warehouse_country, warehouse_name
@@ -324,3 +297,9 @@ More on metrics views and the semantic layer can be found here:
 - <https://issues.apache.org/jira/browse/SPARK-60399> - Jira for Spark native documentation
 - <https://github.com/apache/spark/pull/59386> - PR with Spark native documentation
 - <https://docs.google.com/document/d/1xVTLijvDTJ90lZ_ujwzf9HvBJgWg0mY6cYM44Fcghl0/edit?tab=t.0#heading=h.5fdy0uyv19hp> - "SPIP: Metrics & semantic modeling in Spark" Google Doc
+
+### Spark: Remote spark
+TODO
+
+
+### Spark SQL: AI-Native Analytics in the Engine

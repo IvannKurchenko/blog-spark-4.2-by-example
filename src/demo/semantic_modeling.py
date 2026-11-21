@@ -14,24 +14,7 @@ LANGUAGE YAML
 AS $$
 version: 0.1
 
-source: >
-    SELECT
-        sec.section_id,
-        sec.warehouse_id,
-        sec.`index` as section_index,
-        i.installation_id,
-        i.sensor_id,
-        i.installation_timestamp,
-        i.installation_removal,
-        s.sensor_type,
-        s.manufacturer,
-        s.measurement_unit,
-        w.warehouse_name,
-        w.warehouse_country
-    FROM section sec
-    LEFT JOIN installation i ON i.section_id = sec.section_id
-    LEFT JOIN sensor s ON s.sensor_id = i.sensor_id
-    LEFT JOIN warehouse w ON w.warehouse_id = sec.warehouse_id
+source: installations_view
 
 dimensions:
   - name: warehouse_country
@@ -44,10 +27,10 @@ dimensions:
     expr: sensor_type
 
 measures:
-  - name: total_active_installed_sections
-    expr: COUNT(DISTINCT installation_id) FILTER (WHERE installation_id IS NOT NULL AND installation_removal IS NULL)
-  - name: total_sections
-    expr: COUNT(DISTINCT section_id)
+  - name: total_active_installations
+    expr: COUNT(DISTINCT installation_id) FILTER (WHERE installation_removal IS NULL)
+  - name: total_target_installations
+    expr: COUNT(DISTINCT section_id, sensor_type)
 $$
 """
 
@@ -58,9 +41,9 @@ SELECT
     warehouse_country,
     warehouse_name,
     sensor_type,
-    MEASURE(total_active_installed_sections) as total_active_installed_sections,
-    MEASURE(total_sections) as total_sections,
-    MEASURE(total_active_installed_sections) /  MEASURE(total_sections) as active_installations_coverage
+    MEASURE(total_active_installations) as total_active_installations,
+    MEASURE(total_target_installations) as total_target_installations,
+    MEASURE(total_active_installations) /  MEASURE(total_target_installations) as active_installations_coverage
 FROM installations_metrics
 GROUP BY ROLLUP (warehouse_country, warehouse_name, sensor_type)
 """
@@ -69,9 +52,9 @@ INSTALLATIONS_METRICS_VIEW_GROUPING_SETS = """
 SELECT
     warehouse_country,
     warehouse_name,
-    MEASURE(total_active_installed_sections) as total_active_installed_sections,
-    MEASURE(total_sections) as total_sections,
-    MEASURE(total_active_installed_sections) /  MEASURE(total_sections) as active_installations_coverage
+    MEASURE(total_active_installations) as total_active_installations,
+    MEASURE(total_target_installations) as total_target_installations,
+    MEASURE(total_active_installations) /  MEASURE(total_target_installations) as active_installations_coverage
 FROM installations_metrics
 GROUP BY GROUPING SETS ((warehouse_country), (warehouse_country, warehouse_name))
 """
@@ -82,9 +65,9 @@ SELECT
     warehouse_name,
     section_index,
     sensor_type,
-    MEASURE(total_active_installed_sections) as total_active_installed_sections,
-    MEASURE(total_sections) as total_sections,
-    MEASURE(total_active_installed_sections) /  MEASURE(total_sections) as active_installations_coverage
+    MEASURE(total_active_installations) as total_active_installations,
+    MEASURE(total_target_installations) as total_target_installations,
+    MEASURE(total_active_installations) /  MEASURE(total_target_installations) as active_installations_coverage
 FROM installations_metrics
 GROUP BY ALL
 """
@@ -93,9 +76,9 @@ INSTALLATIONS_METRICS_VIEW_BY_WAREHOUSE = """
 SELECT
     warehouse_country,
     warehouse_name,
-    MEASURE(total_active_installed_sections) AS total_active_installed_sections,
-    MEASURE(total_sections) AS total_sections,
-    MEASURE(total_active_installed_sections) / MEASURE(total_sections) AS active_installations_coverage
+    MEASURE(total_active_installations) AS total_active_installations,
+    MEASURE(total_target_installations) AS total_target_installations,
+    MEASURE(total_active_installations) / MEASURE(total_target_installations) AS active_installations_coverage
 FROM installations_metrics
 GROUP BY warehouse_country, warehouse_name
 """
@@ -104,21 +87,21 @@ INSTALLATIONS_VIEW = """
 CREATE OR REPLACE VIEW installations_view AS
 SELECT
     sec.section_id,
-    sec.warehouse_id,
-    sec.`index` as section_index,
-    i.installation_id,
-    i.sensor_id,
-    i.installation_timestamp,
-    i.installation_removal,
-    s.sensor_type,
-    s.manufacturer,
-    s.measurement_unit,
+    sec.`index` AS section_index,
+    types.sensor_type,
     w.warehouse_name,
-    w.warehouse_country
+    w.warehouse_country,
+    installed.installation_id,
+    installed.installation_removal
 FROM section sec
-LEFT JOIN installation i ON i.section_id = sec.section_id
-LEFT JOIN sensor s ON s.sensor_id = i.sensor_id
+CROSS JOIN (SELECT DISTINCT sensor_type FROM sensor) types
 LEFT JOIN warehouse w ON w.warehouse_id = sec.warehouse_id
+LEFT JOIN (
+    SELECT i.installation_id, i.section_id, s.sensor_type, i.installation_removal
+    FROM installation i
+    JOIN sensor s ON s.sensor_id = i.sensor_id
+) installed ON installed.section_id = sec.section_id
+    AND installed.sensor_type = types.sensor_type
 """
 
 INSTALLATIONS_METRICS_BY_WAREHOUSE_SECTION_SENSOR = """
@@ -128,15 +111,13 @@ WITH section_sensor_counts AS (
         warehouse_name,
         section_index,
         sensor_type,
-        COUNT(DISTINCT CASE
-            WHEN installation_id IS NOT NULL AND installation_removal IS NULL
-            THEN installation_id
-        END) AS total_active_installed_sections,
-        COUNT(DISTINCT section_id) AS total_sections
+        COUNT(DISTINCT installation_id) FILTER (WHERE installation_removal IS NULL)
+            AS total_active_installations,
+        COUNT(DISTINCT section_id, sensor_type) AS total_target_installations
     FROM installations_view
     GROUP BY warehouse_country, warehouse_name, section_index, sensor_type
 )
-SELECT *, total_active_installed_sections / total_sections AS active_installations_coverage
+SELECT *, total_active_installations / total_target_installations AS active_installations_coverage
 FROM section_sensor_counts
 """
 
@@ -146,15 +127,13 @@ WITH warehouse_counts AS (
     SELECT
         warehouse_country,
         warehouse_name,
-        COUNT(DISTINCT CASE
-            WHEN installation_id IS NOT NULL AND installation_removal IS NULL
-            THEN installation_id
-        END) AS total_active_installed_sections,
-        COUNT(DISTINCT section_id) AS total_sections
+        COUNT(DISTINCT installation_id) FILTER (WHERE installation_removal IS NULL)
+            AS total_active_installations,
+        COUNT(DISTINCT section_id, sensor_type) AS total_target_installations
     FROM installations_view
     GROUP BY warehouse_country, warehouse_name
 )
-SELECT *, total_active_installed_sections / total_sections AS active_installations_coverage
+SELECT *, total_active_installations / total_target_installations AS active_installations_coverage
 FROM warehouse_counts
 """
 
@@ -163,17 +142,12 @@ CREATE OR REPLACE VIEW installations_aggregated_view AS
 SELECT
     warehouse_country,
     warehouse_name,
-    sec.`index` as section_index,
+    section_index,
     sensor_type,
-    COUNT(DISTINCT CASE
-        WHEN i.installation_id IS NOT NULL AND i.installation_removal IS NULL
-        THEN i.installation_id
-    END) AS total_active_installed_sections,
-    COUNT(DISTINCT sec.section_id) AS total_sections
-FROM section sec
-LEFT JOIN installation i ON i.section_id = sec.section_id
-LEFT JOIN sensor s ON s.sensor_id = i.sensor_id
-LEFT JOIN warehouse w ON w.warehouse_id = sec.warehouse_id
+    COUNT(DISTINCT installation_id) FILTER (WHERE installation_removal IS NULL)
+        AS total_active_installations,
+    COUNT(DISTINCT section_id, sensor_type) AS total_target_installations
+FROM installations_view
 GROUP BY warehouse_country, warehouse_name, section_index, sensor_type
 """
 
@@ -181,9 +155,9 @@ INSTALLATIONS_AGGREGATED_VIEW_BY_WAREHOUSE = """
 SELECT
     warehouse_country,
     warehouse_name,
-    SUM(total_active_installed_sections) AS total_active_installed_sections,
-    SUM(total_sections) AS total_sections,
-    SUM(total_active_installed_sections) / SUM(total_sections) AS active_installations_coverage
+    SUM(total_active_installations) AS total_active_installations,
+    SUM(total_target_installations) AS total_target_installations,
+    SUM(total_active_installations) / SUM(total_target_installations) AS active_installations_coverage
 FROM installations_aggregated_view
 GROUP BY warehouse_country, warehouse_name
 """
