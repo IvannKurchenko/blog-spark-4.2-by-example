@@ -26,3 +26,11 @@ down:
 app-semantic-modeling:
 	@rm -rf spark-warehouse
 	@uv run app-semantic-modeling
+
+app-vector-function:
+	@rm -rf spark-warehouse
+	@uv run python -m src.demo.vector_functions
+
+app-geo-functions:
+	@rm -rf spark-warehouse
+	@uv run python -m src.demo.geo_functions

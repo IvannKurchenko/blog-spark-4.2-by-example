@@ -1,7 +1,7 @@
 # Spark 4.2 by example: Hands-on overview of new features
 
 ### Introduction
-Most of the media content dedicated to Spark 4.2 recently left some questions behind with regard to practical aspects.
+The recent wave of Spark 4.2 coverage has done a great job introducing what is new, and it leaves room for a closer look at the practical side.
 This is a gap that this post tries to cover. We will discover major new Spark 4.2 features with a focus on hands-on practice.
 
 ### Setup
@@ -26,10 +26,12 @@ The schema tables represent the corresponding domain entities.
 - `installation` – a table describing a sensor installation in a warehouse. Properties: installation_id (incremental PK), section_id (FK), sensor_id (FK), installation_timestamp (TIMESTAMP NTZ), installation_removal (TIMESTAMP NTZ, optional).
 
 ### Spark: Metrics and Semantic Modeling
-A metrics view is another object type that is now available in Spark. The main problem it solves is to bring the semantic layer closer to raw data to have it defined in a single place.
+A metrics view is a new object type available in Spark 4.2. The main problem it solves is to bring the semantic layer closer to raw data to have it defined in a single place.
 Let's consider an example for AWC.
 
-In this theoretical use case, the company goes through a warehouse digitalisation process. Management wants to have visibility into the progress. A business metric called “Active Installations Coverage” was proposed to show the ratio of active installations to target installations. The target is one installation per section per sensor type, using the distinct types in the sensor inventory. The metric should be calculated in the same way at different levels of granularity for different management levels. C-suite management wants to understand the situation across the entire company, while country and warehouse managers want to understand it at their respective levels.
+In this theoretical use case, the company goes through a warehouse digitalisation process. Management wants visibility into the progress. A business metric called “Active Installations Coverage” was proposed to show the ratio of active installations to target installations. The target is one installation per section per sensor type, using the distinct types in the sensor inventory.
+
+The same metric must be calculated at different levels of granularity for different management levels. C-suite management wants to see the picture across the entire company. Country and warehouse managers want the same metric at their respective levels.
 
 The classical approach would be to define precise calculations for each use case. First, we create a view with every section and sensor-type combination, including targets with no active installation. An installation counts as active when its removal timestamp is null:
 ```sql
@@ -289,17 +291,123 @@ Both queries would fail in Spark version `4.2.0`.
 #### References
 More on metrics views and the semantic layer can be found here:
 
-- <https://books.japila.pl/spark-sql-internals/metric-views/>
-- <https://books.japila.pl/spark-sql-internals/sql/SparkSqlAstBuilder/#visitCacheTable>
-- <https://medium.com/@cheegodchang/why-do-we-need-unity-catalog-metric-views-455ce259519e>
-- <https://docs.databricks.com/aws/en/uc-semantics/metric-views/yaml-reference>
-- <https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/sql-ref-syntax-ddl-create-view>
 - <https://issues.apache.org/jira/browse/SPARK-60399> - Jira for Spark native documentation
 - <https://github.com/apache/spark/pull/59386> - PR with Spark native documentation
 - <https://docs.google.com/document/d/1xVTLijvDTJ90lZ_ujwzf9HvBJgWg0mY6cYM44Fcghl0/edit?tab=t.0#heading=h.5fdy0uyv19hp> - "SPIP: Metrics & semantic modeling in Spark" Google Doc
+- <https://docs.databricks.com/aws/en/uc-semantics/metric-views/yaml-reference>
+- <https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/sql-ref-syntax-ddl-create-view>
+- <https://books.japila.pl/spark-sql-internals/metric-views/>
+- <https://books.japila.pl/spark-sql-internals/sql/SparkSqlAstBuilder/#visitCacheTable>
+- <https://medium.com/@cheegodchang/why-do-we-need-unity-catalog-metric-views-455ce259519e>
 
 ### Spark: Remote spark
 TODO
 
 
-### Spark SQL: AI-Native Analytics in the Engine
+### Spark SQL: Vector scoring and top-K retrieval
+Spark 4.2 ships new set of functions to work with vectors. The target use cases is to provide a native support for working with text emdeings.
+Keeping our theme of warehouse IoT porject: for instance we have a sensors catalog table called `catalog` with sensors specification like following:
+```
++-----------+-----------------+--------------------+--------------------+
+|       name|             unit|         description|           embedding|
++-----------+-----------------+--------------------+--------------------+
+|        CO2|              ppm|Measures carbon d...|[0.047913764, 0.0...|
+|   Humidity|             % RH|Measures relative...|[0.050460868, 0.0...|
+|     Motion|          boolean|Detects movement ...|[0.045085106, -0....|
+|      Smoke|percent per meter|Detects airborne ...|[0.03694558, 0.04...|
+|Temperature|               °C|Measures ambient ...|[0.009319099, 0.0...|
++-----------+-----------------+--------------------+--------------------+
+```
+
+and search queries are stored in separate table:
+```
++-----------+--------------------+
+|      query|           embedding|
++-----------+--------------------+
+|fire sensor|[-0.02075623, 0.0...|
++-----------+--------------------+
+```
+
+With new set of functions we can search over embeding vectors natively: 
+```sql
+SELECT q.query, c.name, c.unit, c.description,
+       'Cosine similarity' AS metric,
+       vector_cosine_similarity(q.embedding, c.embedding) AS score
+FROM sensors_query q
+JOIN sensors_catalog c
+EXACT NEAREST 1 BY SIMILARITY vector_cosine_similarity(q.embedding, c.embedding)
+UNION ALL
+SELECT q.query, c.name, c.unit, c.description,
+       'Inner product' AS metric,
+       vector_inner_product(q.embedding, c.embedding) AS score
+FROM sensors_query q
+JOIN sensors_catalog c
+EXACT NEAREST 1 BY SIMILARITY vector_inner_product(q.embedding, c.embedding)
+UNION ALL
+SELECT q.query, c.name, c.unit, c.description,
+       'Negated Euclidean distance' AS metric,
+       -1 * vector_l2_distance(q.embedding, c.embedding) AS score
+FROM sensors_query q
+JOIN sensors_catalog c
+EXACT NEAREST 1 BY SIMILARITY -1 * vector_l2_distance(q.embedding, c.embedding)
+ORDER BY metric, score DESC, name
+```
+
+so seach search would produce result like the following:
+```
+query| name|             unit|         description|              metric|             score|
++-----------+-----+-----------------+--------------------+--------------------+------------------+
+|fire sensor|Smoke|percent per meter|Detects airborne ...|   Cosine similarity|0.6595850586891174|
+|fire sensor|Smoke|percent per meter|Detects airborne ...|       Inner product|0.6595850586891174|
+|fire sensor|Smoke|percent per meter|Detects airborne ...|Negated Euclidean...|-0.825124204158783|
++-----------+-----+-----------------+--------------------+--------------------+------------------+
+```
+
+References:
+- https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.DataFrame.nearestByJoin.html
+- https://spark.apache.org/docs/latest/sql-ref-syntax-qry-select-join.html#parameters
+- https://spark.apache.org/docs/latest/api/sql/vector-functions/
+
+### Spark SQL: Geographical types
+Spark 4.2 finally ships native support for `GEOMETRY` and `GEOGRAPHY` types along with corresponding support of ST_* family of functions to work with them.
+This makes working with geo spatial data way easier with spark. Prior to this [Apache Sedona](https://sedona.apache.org/latest/) was the only major solution for geo spatial data analytics.
+Originally they were developed as a part of [GeoParquet](https://geoparquet.org) initiative, later started to be supported natively by [parquet itself](https://parquet.apache.org/docs/file-format/types/geospatial/).
+
+Continuing our project topic, we could enrich warehouse data with polygon territory like this:
+```sql
+CREATE TABLE warehouse_geography
+USING PARQUET
+AS
+SELECT 1L AS id,
+       'Rotterdam Warehouse' AS name,
+       'Netherlands' AS country,
+       ST_GeogFromWKB(X'01030000000100000005000000CDCCCCCCCCCC1140713D0AD7A3F049406FB9FAB149CE1140713D0AD7A3F049406FB9FAB149CE114020ED7F80B5F04940CDCCCCCCCCCC114020ED7F80B5F04940CDCCCCCCCCCC1140713D0AD7A3F04940') AS polygon
+```
+which creates a table with the following schema:
+```
+root
+ |-- id: long (nullable = true)
+ |-- name: string (nullable = true)
+ |-- country: string (nullable = true)
+ |-- polygon: geography(4326) (nullable = true)
+```
+
+and query correspongly after:
+```sql
+SELECT id, name, country, hex(ST_AsBinary(polygon)) AS polygon_wkb FROM warehouse_geography
+```
+
+result:
+```
++---+-------------------+-----------+--------------------+
+| id|               name|    country|         polygon_wkb|
++---+-------------------+-----------+--------------------+
+|  1|Rotterdam Warehouse|Netherlands|01030000000100000...|
++---+-------------------+-----------+--------------------+
+````
+
+Although this support of geo-spatial data is quite poor at the moment, apart from storign the engine does not yet supports functions like [`st_distance`](https://docs.databricks.com/aws/en/pyspark/reference/functions/st_distance) which exists on Databricks. Without them its quite hard to perform actuall analytics work so far, yet this is important step in full geo data support.
+
+References:
+https://spark.apache.org/docs/4.2.0-preview4/sql-ref-geospatial-types.html
+https://spark.apache.org/docs/latest/sql-ref-geospatial-types.html
