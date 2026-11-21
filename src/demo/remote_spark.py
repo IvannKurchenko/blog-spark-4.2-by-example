@@ -1,8 +1,4 @@
-
 from pyspark.sql import SparkSession
-
-from src.setup.data import build_warehouses
-from src.setup.schemas import WAREHOUSE_SCHEMA
 
 
 def main():
@@ -12,9 +8,16 @@ def main():
         .getOrCreate()
     )
     try:
-        spark.sql("CREATE SCHEMA IF NOT EXISTS production.bronze")
-        warehouses = spark.createDataFrame(build_warehouses(), schema=WAREHOUSE_SCHEMA)
-        warehouses.writeTo("production.bronze.warehouses").using("delta").createOrReplace()
+        spark.sql("CREATE SCHEMA IF NOT EXISTS unity.bronze")
+        spark.sql(
+            """
+            CREATE TABLE IF NOT EXISTS unity.bronze.warehouses (
+                warehouse_id BIGINT NOT NULL,
+                warehouse_name STRING NOT NULL,
+                warehouse_country STRING NOT NULL
+            ) USING DELTA
+            """
+        )
     finally:
         spark.stop()
 

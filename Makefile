@@ -23,6 +23,10 @@ docker-compose-up:
 down:
 	docker compose down
 
+.PHONY: app-remote-spark
+app-remote-spark:
+	@uv run app-remote-spark
+
 app-semantic-modeling:
 	@rm -rf spark-warehouse
 	@uv run app-semantic-modeling

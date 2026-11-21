@@ -301,8 +301,127 @@ More on metrics views and the semantic layer can be found here:
 - <https://medium.com/@cheegodchang/why-do-we-need-unity-catalog-metric-views-455ce259519e>
 
 ### Spark: Remote spark
-TODO
+Spark now allows connect to remove cluster dirrectly from local codebase, no more `spark-submit` needed for this purpose.
+Additional buty of this approach is ability to dockerise entire spark setup. For instance we can easely run spark with OSS Unity Catalog version via docker compose:
+```yaml
+name: unitycatalog
 
+services:
+  # Don't change `server` name because it ui image expects this in runtime
+  server:
+    image: unitycatalog/unitycatalog:v0.7.0
+    ports:
+      - "8080:8080"
+    volumes:
+      - type: volume
+        source: unitycatalog_data
+        target: /opt/unitycatalog/etc/data
+      - type: bind
+        source: ./compose-uc-server.properties
+        target: /home/unitycatalog/etc/conf/server.properties
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - local-bricks
+
+  uc-ui:
+    image: unitycatalog/unitycatalog-ui:main-aadc6fc
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+    networks:
+      - local-bricks
+
+  spark-server:
+    image: apache/spark:4.2.0
+    user: "0"
+    ports:
+      - "15002:15002"
+      - "8081:8080"
+      - "4040:4040"
+    volumes:
+      - type: volume
+        source: unitycatalog_data
+        target: /opt/unitycatalog/etc/data
+    entrypoint:
+      - /opt/spark/bin/spark-submit
+      - --class
+      - org.apache.spark.sql.connect.service.SparkConnectServer
+      - --packages
+      - "io.delta:delta-spark_2.13:4.4.1,io.unitycatalog:unitycatalog-spark_4.2_2.13:0.7.0"
+      - --conf
+      - spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension
+      - --conf
+      - spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog
+      - --conf
+      - spark.sql.catalog.unity=io.unitycatalog.spark.UCSingleCatalog
+      - --conf
+      - "spark.sql.catalog.unity.uri=http://server:8080"
+      - --conf
+      - spark.sql.catalog.unity.token=
+      - --conf
+      - spark.sql.catalog.production=io.unitycatalog.spark.UCSingleCatalog
+      - --conf
+      - "spark.sql.catalog.production.uri=http://server:8080"
+      - --conf
+      - spark.sql.catalog.production.auth.type=static
+      - --conf
+      - spark.sql.catalog.production.auth.token=not-used
+      - --conf
+      - "spark.driver.extraJavaOptions=-Divy.cache.dir=/tmp -Divy.home=/tmp"
+    depends_on:
+      - server
+    networks:
+      - local-bricks
+
+networks:
+  local-bricks:
+    driver: bridge
+
+volumes:
+  unitycatalog_data:
+```
+
+`compose-uc-server.properties` should be the following:
+```
+## Experimental Feature Flags
+# Enable MANAGED table (experimental feature)
+# Default: false (disabled)
+server.managed-table.enabled=true
+
+# Set the UC storage root
+storage-root.tables=/opt/unitycatalog/etc/data
+```
+
+After the setup is up and running it possible to simply connect the spark via host port and continue working with local code:
+```python
+from pyspark.sql import SparkSession
+
+spark = (
+        SparkSession.builder.remote("sc://localhost")
+        .appName("SimpleApp")
+        .getOrCreate()
+    )
+    try:
+        spark.sql("CREATE SCHEMA IF NOT EXISTS unity.bronze")
+        spark.sql(
+            """
+            CREATE TABLE IF NOT EXISTS unity.bronze.warehouses (
+                warehouse_id BIGINT NOT NULL,
+                warehouse_name STRING NOT NULL,
+                warehouse_country STRING NOT NULL
+            ) USING DELTA
+            """
+        )
+    finally:
+        spark.stop()
+```
+after which you can find create schema and table in the local unity catalog:
+![](image.png)
 
 ### Spark SQL: Vector scoring and top-K retrieval
 Spark 4.2 ships new set of functions to work with vectors. The target use cases is to provide a native support for working with text emdeings.
@@ -411,3 +530,13 @@ Although this support of geo-spatial data is quite poor at the moment, apart fro
 References:
 https://spark.apache.org/docs/4.2.0-preview4/sql-ref-geospatial-types.html
 https://spark.apache.org/docs/latest/sql-ref-geospatial-types.html
+
+### Spark SQL: Spark Declarative Pipelines and Auto CDC
+TODO
+
+### Spark SQL: Smaller yet important additions
+
+time buckets
+https://spark.apache.org/docs/latest/api/sql/datetime-functions/#time_bucket
+https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.functions.time_bucket.html
+`QUALIFY` support for select - filter results of window function

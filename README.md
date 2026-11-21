@@ -52,17 +52,9 @@ spark.sql("SHOW CATALOGS").show()
 
 ### Warehouse demo
 
-With the stack running, create the `production` catalog once in Unity Catalog:
+With the stack running, the demo creates the `unity.bronze` schema and an empty
+Delta table at `unity.bronze.warehouses` if they are missing.
 
 ```bash
-curl --fail-with-body -X POST http://localhost:8080/api/2.1/unity-catalog/catalogs \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"production","storage_root":"file:///opt/unitycatalog/etc/data/production"}'
-```
-
-Run the demo to create the `bronze` schema and create or replace
-`production.bronze.warehouses` with the five warehouse rows from the setup script:
-
-```bash
-uv run app-remote-spark
+make app-remote-spark
 ```
