@@ -1,3 +1,7 @@
+.PHONY: setup install format check clean clean-spark docker-compose-up down \
+        demo-remote-spark demo-semantic-modeling demo-vector-function demo-geo-functions \
+        demo-declarative-pipelines-scd
+
 setup:
 	uv venv
 
@@ -23,18 +27,24 @@ docker-compose-up:
 down:
 	docker compose down
 
-.PHONY: app-remote-spark
-app-remote-spark:
+demo-remote-spark:
 	@uv run app-remote-spark
 
-app-semantic-modeling:
+demo-semantic-modeling:
 	@rm -rf spark-warehouse
 	@uv run app-semantic-modeling
 
-app-vector-function:
+demo-vector-function:
 	@rm -rf spark-warehouse
-	@uv run python -m src.demo.vector_functions
+	@uv run app-vector-function
 
-app-geo-functions:
+demo-geo-functions:
 	@rm -rf spark-warehouse
-	@uv run python -m src.demo.geo_functions
+	@uv run app-geo-functions
+
+demo-declarative-pipelines-scd:
+	@rm -rf spark-warehouse
+	@uv run app-create-warehouses
+	@spark-pipelines run --conf spark.sql.catalogImplementation=hive --spec src/demo/declaratime_pipelines_sdc/spark-pipelines.yaml
+	@uv run app-update-warehouses
+	@spark-pipelines run --conf spark.sql.catalogImplementation=hive --spec src/demo/declaratime_pipelines_sdc/spark-pipelines.yaml

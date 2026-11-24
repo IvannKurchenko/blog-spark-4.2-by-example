@@ -3,9 +3,7 @@ from pyspark.sql import SparkSession
 
 def main():
     spark = (
-        SparkSession.builder.remote("sc://localhost")
-        .appName("SimpleApp")
-        .getOrCreate()
+        SparkSession.builder.remote("sc://localhost").appName("SimpleApp").getOrCreate()
     )
     try:
         spark.sql("CREATE SCHEMA IF NOT EXISTS unity.bronze")

@@ -1,7 +1,8 @@
 import logging
 
-from src.setup.create_setup import main as create_setup
 from src.spark_provider import get_spark
+
+from .setup.create_setup import main as create_setup
 
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,7 @@ FROM installations_aggregated_view
 GROUP BY warehouse_country, warehouse_name
 """
 
+
 def safe_sql(spark, query):
     try:
         spark.sql(query).show(n=5)
@@ -187,10 +189,13 @@ def main():
     safe_sql(spark, INSTALLATIONS_METRICS_VIEW_BY_ALL)
     safe_sql(spark, INSTALLATIONS_METRICS_VIEW_BY_WAREHOUSE)
 
-    safe_sql(spark, INSTALLATIONS_METRICS_VIEW_ALL)  # Expected error: SELECT * on a metrics view is currently unsupported.
-    safe_sql(spark, INSTALLATIONS_METRICS_VIEW_ROLLOUP)  # Expected error: ROLLUP on a metrics view is currently unsupported.
+    safe_sql(
+        spark, INSTALLATIONS_METRICS_VIEW_ALL
+    )  # Expected error: SELECT * on a metrics view is currently unsupported.
+    safe_sql(
+        spark, INSTALLATIONS_METRICS_VIEW_ROLLOUP
+    )  # Expected error: ROLLUP on a metrics view is currently unsupported.
     safe_sql(spark, INSTALLATIONS_METRICS_VIEW_GROUPING_SETS)
-
 
 
 if __name__ == "__main__":

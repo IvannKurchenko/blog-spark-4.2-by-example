@@ -540,3 +540,9 @@ time buckets
 https://spark.apache.org/docs/latest/api/sql/datetime-functions/#time_bucket
 https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.functions.time_bucket.html
 `QUALIFY` support for select - filter results of window function
+
+
+### References
+
+https://spark.apache.org/releases/spark-release-4-2-0.html#metric-views-spark-54119
+https://www.databricks.com/blog/introducing-apache-spark-42

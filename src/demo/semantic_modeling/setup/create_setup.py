@@ -4,14 +4,15 @@ from datetime import datetime
 from pyspark.sql import functions as F
 
 from src.spark_provider import get_spark
-from src.setup.data import (
+
+from .data import (
     build_installations,
     build_readings,
     build_sections,
     build_sensors,
     build_warehouses,
 )
-from src.setup.schemas import (
+from .schemas import (
     INSTALLATION_SCHEMA,
     READING_RAW_SCHEMA,
     SECTION_SCHEMA,
@@ -34,10 +35,14 @@ def main():
     warehouses = build_warehouses()
     sections = build_sections(warehouses)
     installations = build_installations(sensors, sections, REF_NOW)
-    readings = build_readings(sensors, installations, REF_NOW, READINGS_PER_INSTALLATION)
+    readings = build_readings(
+        sensors, installations, REF_NOW, READINGS_PER_INSTALLATION
+    )
 
     def write(rows, schema, name):
-        spark.createDataFrame(rows, schema=schema).write.mode("overwrite").saveAsTable(name)
+        spark.createDataFrame(rows, schema=schema).write.mode("overwrite").saveAsTable(
+            name
+        )
 
     write(sensors, SENSOR_SCHEMA, "sensor")
     write(warehouses, WAREHOUSE_SCHEMA, "warehouse")

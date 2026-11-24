@@ -71,9 +71,9 @@ def build_installations(sensors, sections, ref_now):
     uncovered_count = int(len(shuffled_sections) * UNCOVERED_SECTION_RATIO)
     covered_sections = shuffled_sections[uncovered_count:]
 
-    assert len(sensors) >= len(covered_sections), (
-        "need at least one sensor per covered section"
-    )
+    assert len(sensors) >= len(
+        covered_sections
+    ), "need at least one sensor per covered section"
 
     sensor_ids = [sid for sid, *_ in sensors]
     random.shuffle(sensor_ids)

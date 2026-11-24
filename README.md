@@ -56,5 +56,5 @@ With the stack running, the demo creates the `unity.bronze` schema and an empty
 Delta table at `unity.bronze.warehouses` if they are missing.
 
 ```bash
-make app-remote-spark
+make demo-remote-spark
 ```

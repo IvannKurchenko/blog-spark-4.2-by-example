@@ -8,20 +8,21 @@ version = "0.1.0"
 requires-python = "==3.11.*"
 
 dependencies = [
-    "pyspark==4.2.0",
+    "pyspark[pipelines]==4.2.0",
     "pyspark-client==4.2.0",
+    "delta-spark==4.4.1",
     "sentence-transformers==6.3.0",
-]
-
-[project.optional-dependencies]
-dev = [
     "ruff==0.14.4",
     "black==25.11.0",
 ]
 
 [project.scripts]
-app-remote-spark = "src.demo.remote_spark:main"
-app-semantic-modeling = "src.demo.semantic_modeling:main"
+app-remote-spark = "src.demo.remote_spark.demo:main"
+app-semantic-modeling = "src.demo.semantic_modeling.demo:main"
+app-vector-function = "src.demo.vector_functions.demo:main"
+app-geo-functions = "src.demo.geo_functions.demo:main"
+app-create-warehouses = "src.demo.declaratime_pipelines_sdc.setup.create_warehouses:main"
+app-update-warehouses = "src.demo.declaratime_pipelines_sdc.setup.update_warehouses:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
